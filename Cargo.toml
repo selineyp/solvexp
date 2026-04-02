@@ -1,0 +1,16 @@
+[package]
+name = "solvexp"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "solvexp"
+crate-type = ["cdylib"]
+
+[lints.clippy]
+pedantic = "warn"
+nursery = "warn"
+
+[dependencies]
+pyo3 = { version = "0.25", features = ["extension-module"] }
+rand = "0.8"

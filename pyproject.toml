@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "solvexp"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["pydantic>=2.0"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "solvexp._solver"
+
+[tool.pylint.main]
+extension-pkg-allow-list = ["pydantic"]
+
+[tool.pylint.basic]
+function-naming-style = "camelCase"
+method-naming-style = "camelCase"
+argument-naming-style = "camelCase"
+variable-naming-style = "camelCase"
+attr-naming-style = "camelCase"
