@@ -1,15 +1,16 @@
+use rayon::prelude::*;
 use pyo3::prelude::*;
 use rand::seq::SliceRandom;
 use std::collections::{HashMap, HashSet};
 
-fn search(args: &Vec<String>, attacks: &HashMap<String, Vec<String>>, assignments: HashMap<String, Option<bool>>, newAssignment: Option<(&String, bool)>) -> Option<HashMap<String, Option<bool>>>    {
+fn search(args: &Vec<String>, attacks: &HashMap<String, Vec<String>>, assignments: HashMap<String, Option<bool>>, new_assignment: Option<(&String, bool)>) -> Option<HashMap<String, Option<bool>>>    {
     let mut assignments = assignments.clone();
-    if let Some((var, value)) = newAssignment {
-        assignments = branchAndPropagate(attacks, assignments, (var.to_string(), value));
+    if let Some((var, value)) = new_assignment {
+        assignments = branch_and_propagate(attacks, assignments, (var.to_string(), value));
     }
     // pick random variable and assign a value
-    let unassigned: Vec<&String> = assignments.iter()                                                                   
-                                .filter(|(_, val)| val.is_none())                                                                                   
+    let unassigned: Vec<&String> = assignments.iter()
+                                .filter(|(_, val)| val.is_none())
                                 .map(|(key, _)| key)
                                 .collect();
     if unassigned.is_empty() {
@@ -21,52 +22,49 @@ fn search(args: &Vec<String>, attacks: &HashMap<String, Vec<String>>, assignment
                 let attackers: Vec<&String> = attacks.iter()
                                                 .filter(|(_, targets)| targets.contains(&arg))
                                                 .map(|(attacker, _)| attacker)
-                                                .collect(); 
-                let attacked = attackers.iter().any(|a| assignments.get(a.as_str()) == Some(&Some(true)));               
+                                                .collect();
+                let attacked = attackers.iter().any(|a| assignments.get(a.as_str()) == Some(&Some(true)));
                 if !attacked { return None; }
             }
         }
         // if we reach here, we found a stable extension
         return Some(assignments); // return the stable extension
     }
-    // TODO: implement a better heuristic for variable selection    
-    let selectedVar: String = (*unassigned.choose(&mut rand::thread_rng())?).clone();
+    // TODO: implement a better heuristic for variable selection
+    let selected_var: String = (*unassigned.choose(&mut rand::thread_rng())?).clone();
     drop(unassigned);
-    let lhsRes: Option<HashMap<String, Option<bool>>> = search(&args, &attacks, assignments.clone(), Some((&selectedVar, true)));
-    let rhsRes: Option<HashMap<String, Option<bool>>> = search(&args, &attacks, assignments.clone(), Some((&selectedVar, false)));
+    let branching_assignments = vec![
+        (selected_var.clone(), true),
+        (selected_var.clone(), false)
+    ];
 
-    // TODO: implement logic to combine results from both branches
-    if let Some(res) = lhsRes {
-        return Some(res);
-    }
-    if let Some(res) = rhsRes {
-        return Some(res);
-    }
-    return None;
+    return branching_assignments.par_iter().map(|(var, value)| {
+        search(args, attacks, assignments.clone(), Some((var, *value)))
+    }).find_any(|res| res.is_some()).flatten();
 }
 
-fn branchAndPropagate(attacks: &HashMap<String, Vec<String>>, mut assignments: HashMap<String, Option<bool>>, newAssignment: (String, bool)) -> HashMap<String, Option<bool>> {
-    let (selectedVar, selectedValue) = newAssignment;
+fn branch_and_propagate(attacks: &HashMap<String, Vec<String>>, mut assignments: HashMap<String, Option<bool>>, new_assignment: (String, bool)) -> HashMap<String, Option<bool>> {
+    let (selected_var, selected_value) = new_assignment;
     // propagate implications of the assignment
     assignments.iter_mut().for_each(|(key, value)| {
-        if *key == selectedVar {
-            *value = Some(selectedValue);
+        if *key == selected_var {
+            *value = Some(selected_value);
         }
     });
 
-    if selectedValue {
+    if selected_value {
         for (arg, targets) in attacks {
-            if *arg == selectedVar {
+            if *arg == selected_var {
                 for target in targets {
-                    // selectedVar is true, so everything it attacks must be false
+                    // selected_var is true, so everything it attacks must be false
                     assignments.iter_mut().for_each(|(name, value)| {
                         if name == target {
                             *value = Some(false);
                         }
                     });
                 }
-            } else if targets.contains(&selectedVar) {
-                // selectedVar is true, so anything attacking it must be false (conflict-free)
+            } else if targets.contains(&selected_var) {
+                // selected_var is true, so anything attacking it must be false (conflict-free)
                 assignments.iter_mut().for_each(|(key, value)| {
                     if *key == *arg {
                         *value = Some(false);
@@ -79,24 +77,21 @@ fn branchAndPropagate(attacks: &HashMap<String, Vec<String>>, mut assignments: H
 }
 
 #[pyfunction]
-fn computeStableExtension(args: Vec<String>, attacks: HashMap<String, Vec<String>>) -> PyResult<HashSet<String>> {
-    // Implement a simple DPLL algorithm with propagation
-    // This is a placeholder for the actual implementation
-    let mut tempAssignments = HashMap::new();
-    // initialize tempAssignments with the variables from the problem
+fn compute_stable_extension(args: Vec<String>, attacks: HashMap<String, Vec<String>>) -> PyResult<HashSet<String>> {
+    let mut temp_assignments = HashMap::new();
     for arg in &args {
-        tempAssignments.insert(arg.clone(), None);
+        temp_assignments.insert(arg.clone(), None);
     }
-    let assignments = search(&args, &attacks, tempAssignments, None);
-    let mut stableExtension = HashSet::new();
+    let assignments = search(&args, &attacks, temp_assignments, None);
+    let mut stable_extension = HashSet::new();
     if let Some(assignments) = assignments {
         for (key, value) in assignments {
             if value == Some(true) {
-                stableExtension.insert(key.clone());
+                stable_extension.insert(key.clone());
             }
         }
     }
-    Ok(stableExtension)
+    Ok(stable_extension)
 }
 
 #[cfg(test)]
@@ -104,11 +99,11 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn makeAssignments(args: &[&str]) -> HashMap<String, Option<bool>> {
+    fn make_assignments(args: &[&str]) -> HashMap<String, Option<bool>> {
         args.iter().map(|a| (a.to_string(), None)).collect()
     }
 
-    fn makeAttacks(pairs: &[(&str, &str)]) -> HashMap<String, Vec<String>> {
+    fn make_attacks(pairs: &[(&str, &str)]) -> HashMap<String, Vec<String>> {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
         for (attacker, target) in pairs {
             map.entry(attacker.to_string()).or_default().push(target.to_string());
@@ -116,56 +111,56 @@ mod tests {
         map
     }
 
-    fn inExtension(result: &Option<HashMap<String, Option<bool>>>, name: &str) -> bool {
+    fn in_extension(result: &Option<HashMap<String, Option<bool>>>, name: &str) -> bool {
         result.as_ref().unwrap().get(name) == Some(&Some(true))
     }
 
     // No arguments, no attacks → empty set is the unique stable extension
     #[test]
-    fn emptyFramework() {
-        let result = search(&vec![], &HashMap::new(), makeAssignments(&[]), None);
+    fn empty_framework() {
+        let result = search(&vec![], &HashMap::new(), make_assignments(&[]), None);
         assert!(result.is_some());
         assert!(result.unwrap().is_empty());
     }
 
     // Single argument with no attacks → {a} is the unique stable extension
     #[test]
-    fn singleUnattackedArg() {
+    fn single_unattacked_arg() {
         let args = vec!["a".to_string()];
-        let result = search(&args, &HashMap::new(), makeAssignments(&["a"]), None);
+        let result = search(&args, &HashMap::new(), make_assignments(&["a"]), None);
         assert!(result.is_some());
     }
 
     // Mutual attack a↔b → exactly one of {a} or {b} is returned
     #[test]
-    fn mutualAttack() {
+    fn mutual_attack() {
         let args = vec!["a".to_string(), "b".to_string()];
-        let attacks = makeAttacks(&[("a", "b"), ("b", "a")]);
-        let result = search(&args, &attacks, makeAssignments(&["a", "b"]), None);
+        let attacks = make_attacks(&[("a", "b"), ("b", "a")]);
+        let result = search(&args, &attacks, make_assignments(&["a", "b"]), None);
         assert!(result.is_some());
         let ext = result.unwrap();
-        let aIn = ext.iter().any(|(k, v)| k == "a" && *v == Some(true));
-        let bIn = ext.iter().any(|(k, v)| k == "b" && *v == Some(true));
-        assert!(aIn ^ bIn, "exactly one of a or b should be in the extension");
+        let a_in = ext.iter().any(|(k, v)| k == "a" && *v == Some(true));
+        let b_in = ext.iter().any(|(k, v)| k == "b" && *v == Some(true));
+        assert!(a_in ^ b_in, "exactly one of a or b should be in the extension");
     }
 
     // Chain a→b→c → unique stable extension is {a, c}
     #[test]
     fn chain() {
         let args = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        let attacks = makeAttacks(&[("a", "b"), ("b", "c")]);
-        let result = search(&args, &attacks, makeAssignments(&["a", "b", "c"]), None);
-        assert!(inExtension(&result, "a"));
-        assert!(!inExtension(&result, "b"));
-        assert!(inExtension(&result, "c"));
+        let attacks = make_attacks(&[("a", "b"), ("b", "c")]);
+        let result = search(&args, &attacks, make_assignments(&["a", "b", "c"]), None);
+        assert!(in_extension(&result, "a"));
+        assert!(!in_extension(&result, "b"));
+        assert!(in_extension(&result, "c"));
     }
 
     // 4-cycle a→b→c→d→a → two stable extensions {a,c} or {b,d}
     #[test]
-    fn fourCycle() {
+    fn four_cycle() {
         let args = vec!["a".to_string(), "b".to_string(), "c".to_string(), "d".to_string()];
-        let attacks = makeAttacks(&[("a", "b"), ("b", "c"), ("c", "d"), ("d", "a")]);
-        let result = search(&args, &attacks, makeAssignments(&["a", "b", "c", "d"]), None);
+        let attacks = make_attacks(&[("a", "b"), ("b", "c"), ("c", "d"), ("d", "a")]);
+        let result = search(&args, &attacks, make_assignments(&["a", "b", "c", "d"]), None);
         assert!(result.is_some());
         let ext = result.unwrap();
         let a = ext.get("a") == Some(&Some(true));
@@ -177,10 +172,10 @@ mod tests {
 
     // Self-attacking argument → no stable extension exists
     #[test]
-    fn selfAttack() {
+    fn self_attack() {
         let args = vec!["a".to_string()];
-        let attacks = makeAttacks(&[("a", "a")]);
-        let result = search(&args, &attacks, makeAssignments(&["a"]), None);
+        let attacks = make_attacks(&[("a", "a")]);
+        let result = search(&args, &attacks, make_assignments(&["a"]), None);
         assert!(result.is_none());
     }
 }

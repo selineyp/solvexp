@@ -14,3 +14,4 @@ nursery = "warn"
 [dependencies]
 pyo3 = { version = "0.25", features = ["extension-module"] }
 rand = "0.8"
+rayon = "1.10"
