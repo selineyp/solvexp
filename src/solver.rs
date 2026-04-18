@@ -1,14 +1,17 @@
 use rayon::prelude::*;
 use pyo3::prelude::*;
 use rand::seq::SliceRandom;
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, vec};
+
+fn vector_copy(vec: Vec<(String, bool)>) -> Vec<(String, bool)> {
+    vec.into_iter().map(|(s, b)| (s.clone(), b)).collect()
+}
 
 fn search(args: &Vec<String>, attacks: &HashMap<String, Vec<String>>, assignments: HashMap<String, Option<bool>>, new_assignment: Option<(&String, bool)>) -> Option<HashMap<String, Option<bool>>>    {
     let mut assignments = assignments.clone();
     if let Some((var, value)) = new_assignment {
-        assignments = branch_and_propagate(attacks, assignments, (var.to_string(), value));
+        assignments = branch_and_propagate(attacks, assignments, vec![(var.to_string(), value)]);
     }
-    // pick random variable and assign a value
     let unassigned: Vec<&String> = assignments.iter()
                                 .filter(|(_, val)| val.is_none())
                                 .map(|(key, _)| key)
@@ -37,47 +40,60 @@ fn search(args: &Vec<String>, attacks: &HashMap<String, Vec<String>>, assignment
         (selected_var.clone(), true),
         (selected_var.clone(), false)
     ];
-
-    return branching_assignments.par_iter().map(|(var, value)| {
+    return branching_assignments.iter().map(|(var, value)| {
         search(args, attacks, assignments.clone(), Some((var, *value)))
-    }).find_any(|res| res.is_some()).flatten();
+    }).find(|res| res.is_some()).flatten();
 }
 
-fn branch_and_propagate(attacks: &HashMap<String, Vec<String>>, mut assignments: HashMap<String, Option<bool>>, new_assignment: (String, bool)) -> HashMap<String, Option<bool>> {
-    let (selected_var, selected_value) = new_assignment;
-    // propagate implications of the assignment
-    assignments.iter_mut().for_each(|(key, value)| {
-        if *key == selected_var {
-            *value = Some(selected_value);
+fn branch_and_propagate(attacks: &HashMap<String, Vec<String>>, mut assignments: HashMap<String, Option<bool>>, new_assignments: Vec<(String, bool)>) -> HashMap<String, Option<bool>> {
+    for (selected_var, selected_value) in new_assignments {
+        if assignments.get(&selected_var) == Some(&Some(selected_value)) {
+            continue;
         }
-    });
-
-    if selected_value {
-        for (arg, targets) in attacks {
-            if *arg == selected_var {
-                for target in targets {
-                    // selected_var is true, so everything it attacks must be false
-                    assignments.iter_mut().for_each(|(name, value)| {
-                        if name == target {
-                            *value = Some(false);
-                        }
-                    });
-                }
-            } else if targets.contains(&selected_var) {
-                // selected_var is true, so anything attacking it must be false (conflict-free)
-                assignments.iter_mut().for_each(|(key, value)| {
-                    if *key == *arg {
-                        *value = Some(false);
-                    }
-                });
+        let mut inferred_assignments: Vec<(String, bool)> = vec![];
+        assignments.iter_mut().for_each(|(key, value)| {
+            if *key == selected_var {
+                *value = Some(selected_value);
             }
+        });
+
+        if selected_value {
+            for (arg, targets) in attacks {
+                if *arg == selected_var {
+                    for target in targets {
+                        if assignments.get(target) != Some(&Some(false)) {
+                            inferred_assignments.push((target.clone(), false));
+                        }
+                    }
+                } else if targets.contains(&selected_var) {
+                    if assignments.get(arg) != Some(&Some(false)) {
+                        inferred_assignments.push((arg.clone(), false));
+                    }
+                }
+            }
+        } else {
+            let attackers: Vec<&String> = attacks.iter()
+                                            .filter(|(_, targets)| targets.contains(&selected_var))
+                                            .map(|(attacker, _)| attacker)
+                                            .collect();
+            let false_count = attackers.iter().filter(|arg| assignments.get(**arg) == Some(&Some(false))).count();
+            if !attackers.is_empty() && false_count == attackers.len() - 1 {
+                if let Some(forced) = attackers.iter().find(|arg| assignments.get(**arg) != Some(&Some(false))) {
+                    if assignments.get(*forced) != Some(&Some(true)) {
+                        inferred_assignments.push(((*forced).clone(), true));
+                    }
+                }
+            }
+        }
+        if !inferred_assignments.is_empty() {
+            assignments = branch_and_propagate(attacks, assignments, inferred_assignments);
         }
     }
     return assignments;
 }
 
 #[pyfunction]
-fn compute_stable_extension(args: Vec<String>, attacks: HashMap<String, Vec<String>>) -> PyResult<HashSet<String>> {
+pub fn compute_stable_extension(args: Vec<String>, attacks: HashMap<String, Vec<String>>) -> PyResult<HashSet<String>> {
     let mut temp_assignments = HashMap::new();
     for arg in &args {
         temp_assignments.insert(arg.clone(), None);

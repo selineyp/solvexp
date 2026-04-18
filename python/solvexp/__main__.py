@@ -1,17 +1,16 @@
 
-from python.solvexp.encodings.stable_marriage import StableMarriageEncoding
-from python.solvexp.problems.stable_marriage import SMTI
+from solvexp.src.encodings.stable_marriage import StableMarriageEncoding
+from solvexp.src.problems.stable_marriage import SMTI
 
 
 if __name__ == "__main__":
-    # read file 
-    with open("input.txt", "r") as f:
-        data = f.read()
-    smti = SMTI.from_string(data)
+    import sys
+    filename = sys.stdin.readline().strip() if not sys.stdin.isatty() else input("Enter file name: ")
+    smti = SMTI.from_file(filename)
     argFramework = StableMarriageEncoding.encode(smti)
     # solve
-    stableSol = argFramework.computeStableExtension()
-    print(stableSol)
-    for pair in stableSol:
+    print('Computing a stable marriage...')
+    stableExt = argFramework.computeStableExtension()
+    for pair in stableExt:
         print(pair)
-        print('explanation for pair:', argFramework.getExplanation(pair))
+        print('Explanation for pair:', argFramework.getExplanation(stableExt, pair))

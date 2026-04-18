@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from typing import TypeAlias
-
+from .._solver import compute_stable_extension
 
 Arg: TypeAlias = tuple[str, str]
 
@@ -9,31 +9,24 @@ class ArgumentationFramework(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     arguments: frozenset[Arg] = frozenset()
-    attacks: dict[Arg, list[Arg]] = {}
-
-    def computeGroundedExtension(self) -> frozenset[Arg]:
-        '''
-        Compute the grounded extension of the argumentation framework.
-        '''
-        argSet = frozenset()
-        while True:
-            result = self.fixedPointOperator(argSet)
-            if result == argSet:
-                break
-            argSet = result
-        return argSet
-
-    def computePreferredExtension(self) -> frozenset[Arg]:
-        # maximal admissible set
-        # a conflict-free set S is admissible if every argument in S is acceptable to S
-        pass
+    attacks: dict[Arg, list[Arg]] = {}        # a conflict-free set S is admissible if every argument in S is acceptable to S
 
     def computeStableExtension(self) -> frozenset[Arg]:
         '''
         Compute the stable extension of the argumentation framework.
         A conflict-free set S is a stable extension if every argument not in S is attacked by some argument in S.
         '''
-        pass
+
+        def arg_to_str(a: Arg) -> str:
+            return f"{a[0]}:{a[1]}"
+
+        args = [arg_to_str(a) for a in self.arguments]
+        attacks_map = {arg_to_str(attacker): [arg_to_str(t) for t in targets]
+                       for attacker, targets in self.attacks.items()}
+
+        result: set[str] = compute_stable_extension(args, attacks_map)
+        return frozenset((s.split(":", 1)[0], s.split(":", 1)[1]) for s in result)
+
 
     def getExplanation(self, stableExtension: frozenset[Arg], arg: Arg) -> str:
         '''
@@ -46,13 +39,13 @@ class ArgumentationFramework(BaseModel):
             A string containing the explanation.
         '''
         explanation = f"Argument {arg} is in the stable extension because:\n"
-        for attacker, targets in self.attacks:
+        for attacker, targets in self.attacks.items():
             if arg in targets:
                 explanation += f"- It is attacked by {attacker}, but {attacker} is attacked by "
-                attackersOfAttacker = frozenset([attacker2 for attacker2, targets2 in self.attacks if attacker in targets2])
+                attackersOfAttacker = frozenset(a for a, t in self.attacks.items() if attacker in t)
                 attackersInStableExtension = attackersOfAttacker.intersection(stableExtension)
                 if attackersInStableExtension:
-                    explanation += ", ".join(attackersInStableExtension) + " which are in the stable extension.\n"
+                    explanation += ", ".join(str(a) for a in attackersInStableExtension) + " which is/are in the stable extension.\n"
         return explanation
 
     def isAcceptable(self, arg: Arg, argSet: frozenset[Arg]) -> bool:
@@ -68,8 +61,8 @@ class ArgumentationFramework(BaseModel):
         '''
         # an argument is acceptable to a set S
         # if all its attackers are attacked by some argument in S
-        for attacker, targets in self.attacks:
-            if arg in targets and not any(attacker in targets2 and attacker2 in argSet for attacker2, targets2 in self.attacks):
+        for attacker, targets in self.attacks.items():
+            if arg in targets and not any(attacker in t and a in argSet for a, t in self.attacks.items()):
                 return False
         return True
 
